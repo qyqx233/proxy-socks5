@@ -53,13 +53,25 @@ func getPublicIp() {
 type IpRule struct {
 	AllowIp string
 	regx    *regexp.Regexp
+	enable  bool
 }
 
-func NewIpControl(ip string) socks5.RuleSet {
+func NewIpControl(ip string, enable bool) socks5.RuleSet {
 	return &IpRule{
 		AllowIp: ip,
 		regx:    regexp.MustCompile(ip),
+		enable:  enable,
 	}
+}
+
+func (c IpRule) Allow(ctx context.Context, req *socks5.Request) (context.Context, bool) {
+	if c.enable {
+		if dt.nonEmpty {
+			return ctx, dt.Contains(req.DestAddr.FQDN)
+		}
+		return ctx, false
+	}
+	return ctx, true
 }
 
 type Syncer interface {
@@ -96,13 +108,6 @@ func (f *FileSyncer) Sync() (sl []string, err error) {
 		sl = append(sl, string(bytes.Trim(data, " \t\r\n")))
 	}
 	return
-}
-
-func (c IpRule) Allow(ctx context.Context, req *socks5.Request) (context.Context, bool) {
-	if dt.nonEmpty {
-		return ctx, dt.Contains(req.DestAddr.FQDN)
-	}
-	return ctx, false
 }
 
 type DtSync struct {
@@ -145,20 +150,23 @@ func (w emptyWriter) Write(p []byte) (n int, err error) {
 
 func main() {
 	var addr, port, allowIp, whiteIp string
-	var verbose bool
+	var verbose, dif bool
 	flag.StringVar(&addr, "addr", "localhost", "addr")
 	flag.StringVar(&port, "port", "8082", "port")
 	flag.StringVar(&allowIp, "aip", "8.8.8.8", "port")
 	flag.StringVar(&whiteIp, "white", "white.ip", "white ip config")
 	flag.BoolVar(&verbose, "v", false, "verbose")
+	flag.BoolVar(&dif, "dif", true, "dest ip filter")
 	flag.Parse()
+
+	fmt.Printf("dif=[%v], verbose=[%v]\n", dif, verbose)
 	getPublicIp()
 	runtime.GOMAXPROCS(1)
 
 	dtSync.syncWhiteIp(whiteIp)
 	go syncWhiteIpLoop(whiteIp)
 	conf := &socks5.Config{
-		Rules: NewIpControl(allowIp),
+		Rules: NewIpControl(allowIp, dif),
 		// Logger: log.New(emptyWriter{}, "", log.LstdFlags),
 	}
 	if !verbose {
