@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -98,7 +99,6 @@ func (f *FileSyncer) Sync() (sl []string, err error) {
 }
 
 func (c IpRule) Allow(ctx context.Context, req *socks5.Request) (context.Context, bool) {
-	fmt.Println(req.DestAddr.FQDN)
 	if dt.nonEmpty {
 		return ctx, dt.Contains(req.DestAddr.FQDN)
 	}
@@ -145,10 +145,12 @@ func (w emptyWriter) Write(p []byte) (n int, err error) {
 
 func main() {
 	var addr, port, allowIp, whiteIp string
+	var verbose bool
 	flag.StringVar(&addr, "addr", "localhost", "addr")
 	flag.StringVar(&port, "port", "8082", "port")
 	flag.StringVar(&allowIp, "aip", "8.8.8.8", "port")
 	flag.StringVar(&whiteIp, "white", "white.ip", "white ip config")
+	flag.BoolVar(&verbose, "v", false, "verbose")
 	flag.Parse()
 	getPublicIp()
 	runtime.GOMAXPROCS(1)
@@ -158,6 +160,9 @@ func main() {
 	conf := &socks5.Config{
 		Rules: NewIpControl(allowIp),
 		// Logger: log.New(emptyWriter{}, "", log.LstdFlags),
+	}
+	if !verbose {
+		conf.Logger = log.New(emptyWriter{}, "", log.LstdFlags)
 	}
 	server, err := socks5.New(conf)
 	if err != nil {
