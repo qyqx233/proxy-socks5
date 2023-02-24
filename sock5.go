@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -59,6 +62,42 @@ func NewIpControl(ip string) socks5.RuleSet {
 	}
 }
 
+type Syncer interface {
+	Sync() (sl []string, err error)
+}
+
+type FileSyncer struct {
+	f *os.File
+}
+
+func NewFileSyncer(path string) (fs *FileSyncer, err error) {
+	var f *os.File
+	f, err = os.Open(path)
+	if err != nil {
+		return
+	}
+	fs = &FileSyncer{
+		f: f,
+	}
+	return
+}
+
+func (f *FileSyncer) Sync() (sl []string, err error) {
+	r := bufio.NewReader(f.f)
+	var data []byte
+	for {
+		data, _, err = r.ReadLine()
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+				break
+			}
+		}
+		sl = append(sl, string(bytes.Trim(data, " \t\r\n")))
+	}
+	return
+}
+
 func (c IpRule) Allow(ctx context.Context, req *socks5.Request) (context.Context, bool) {
 	if c.regx.MatchString(req.RemoteAddr.IP.String()) {
 		fmt.Println(req.DestAddr.FQDN)
@@ -79,16 +118,20 @@ func init() {
 }
 
 func syncWhiteIp(file string) {
+	data, err := ioutil.ReadFile(file)
+	if err != nil {
+		return
+	}
+	for _, ip := range strings.Split(string(data), "\n") {
+		whiteIpSet[ip] = struct{}{}
+	}
+}
+
+func syncWhiteIpLoop(file string) {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		data, err := ioutil.ReadFile(file)
-		if err != nil {
-			return
-		}
-		for _, ip := range strings.Split(string(data), "\n") {
-			whiteIpSet[ip] = struct{}{}
-		}
+		syncWhiteIp(file)
 	}
 }
 
@@ -102,7 +145,8 @@ func main() {
 	getPublicIp()
 	runtime.GOMAXPROCS(1)
 	if _, err := os.Stat(whiteIp); err == nil {
-		go syncWhiteIp(whiteIp)
+		syncWhiteIp(whiteIp)
+		go syncWhiteIpLoop(whiteIp)
 	}
 	conf := &socks5.Config{Rules: NewIpControl(allowIp)}
 	server, err := socks5.New(conf)
