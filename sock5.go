@@ -13,7 +13,6 @@ import (
 	"os"
 	"regexp"
 	"runtime"
-	"strings"
 	"time"
 
 	socks5 "github.com/armon/go-socks5"
@@ -99,40 +98,49 @@ func (f *FileSyncer) Sync() (sl []string, err error) {
 }
 
 func (c IpRule) Allow(ctx context.Context, req *socks5.Request) (context.Context, bool) {
-	if c.regx.MatchString(req.RemoteAddr.IP.String()) {
-		fmt.Println(req.DestAddr.FQDN)
-		if len(whiteIpSet) == 0 {
-			return ctx, true
-		}
-		if _, ok := whiteIpSet[req.DestAddr.FQDN]; ok {
-			return ctx, true
-		}
+	fmt.Println(req.DestAddr.FQDN)
+	if dt.nonEmpty {
+		return ctx, dt.Contains(req.DestAddr.FQDN)
 	}
 	return ctx, false
 }
 
-var whiteIpSet map[string]struct{}
-
-func init() {
-	whiteIpSet = make(map[string]struct{})
+type DtSync struct {
+	updatedAt time.Time
 }
 
-func syncWhiteIp(file string) {
-	data, err := ioutil.ReadFile(file)
-	if err != nil {
-		return
-	}
-	for _, ip := range strings.Split(string(data), "\n") {
-		whiteIpSet[ip] = struct{}{}
+func (s *DtSync) syncWhiteIp(whiteIp string) {
+	if stat, err := os.Stat(whiteIp); err == nil && stat.ModTime().After(s.updatedAt) {
+		fmt.Println("更新ip白名单")
+		syncer, err := NewFileSyncer(whiteIp)
+		if err == nil {
+			ips, err := syncer.Sync()
+			if err == nil {
+				for _, ip := range ips {
+					dt.nonEmpty = true
+					dt.tree.AddDomainSuffix(ip, "")
+				}
+				s.updatedAt = stat.ModTime()
+			}
+		}
 	}
 }
+
+var dtSync = new(DtSync)
 
 func syncWhiteIpLoop(file string) {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		syncWhiteIp(file)
+		dtSync.syncWhiteIp(file)
 	}
+}
+
+type emptyWriter struct {
+}
+
+func (w emptyWriter) Write(p []byte) (n int, err error) {
+	return len(p), nil
 }
 
 func main() {
@@ -144,11 +152,13 @@ func main() {
 	flag.Parse()
 	getPublicIp()
 	runtime.GOMAXPROCS(1)
-	if _, err := os.Stat(whiteIp); err == nil {
-		syncWhiteIp(whiteIp)
-		go syncWhiteIpLoop(whiteIp)
+
+	dtSync.syncWhiteIp(whiteIp)
+	go syncWhiteIpLoop(whiteIp)
+	conf := &socks5.Config{
+		Rules: NewIpControl(allowIp),
+		// Logger: log.New(emptyWriter{}, "", log.LstdFlags),
 	}
-	conf := &socks5.Config{Rules: NewIpControl(allowIp)}
 	server, err := socks5.New(conf)
 	if err != nil {
 		panic(err)
