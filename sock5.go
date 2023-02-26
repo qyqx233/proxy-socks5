@@ -57,14 +57,21 @@ type IpRule struct {
 }
 
 func NewIpControl(ip string, enable bool) socks5.RuleSet {
+	var regx *regexp.Regexp = nil
+	if ip != "" {
+		regx = regexp.MustCompile(ip)
+	}
 	return &IpRule{
 		AllowIp: ip,
-		regx:    regexp.MustCompile(ip),
+		regx:    regx,
 		enable:  enable,
 	}
 }
 
 func (c IpRule) Allow(ctx context.Context, req *socks5.Request) (context.Context, bool) {
+	if c.regx != nil && !c.regx.MatchString(req.RemoteAddr.String()) {
+		return ctx, false
+	}
 	if c.enable {
 		if dt.nonEmpty {
 			return ctx, dt.Contains(req.DestAddr.FQDN)
@@ -153,7 +160,7 @@ func main() {
 	var verbose, dif bool
 	flag.StringVar(&addr, "addr", "localhost", "addr")
 	flag.StringVar(&port, "port", "8082", "port")
-	flag.StringVar(&allowIp, "aip", "8.8.8.8", "port")
+	flag.StringVar(&allowIp, "aip", "", "port")
 	flag.StringVar(&whiteIp, "white", "white.ip", "white ip config")
 	flag.BoolVar(&verbose, "v", false, "verbose")
 	flag.BoolVar(&dif, "dif", true, "dest ip filter")
