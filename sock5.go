@@ -177,6 +177,7 @@ func main() {
 		// Logger: log.New(emptyWriter{}, "", log.LstdFlags),
 	}
 	if !verbose {
+		fmt.Println("禁止日志输出")
 		conf.Logger = log.New(emptyWriter{}, "", log.LstdFlags)
 	}
 	server, err := socks5.New(conf)
